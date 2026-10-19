@@ -54,6 +54,22 @@ class LocalBilibiliTest {
         assertTrue(assertThrows(BilibiliException::class.java) { LocalBilibiliClient.pickAudio(data) }.message!!.contains("试听"))
     }
 
+    @Test fun bulkCacheSkipsCompletedAndActiveDownloadsButRetriesFailures() {
+        fun song(id: String) = WorkstationTrack(id = id, kind = "bilibili", bvid = bvid)
+        val selected = listOf("complete", "active", "queued", "removing", "failed", "paused", "new", "new").map(::song) +
+            WorkstationTrack(id = "server", kind = "local", audioId = "server-only")
+        val statuses = mapOf("complete" to "已完整缓存", "active" to "缓存中 30%", "queued" to "等待缓存",
+            "removing" to "清理缓存中", "failed" to "缓存失败，点击重试", "paused" to "缓存已暂停")
+        assertEquals(listOf("failed", "paused", "new"), pendingLocalDownloads(selected, statuses).map { it.id })
+    }
+
+    @Test fun bulkCacheUsesOnlyTheVisibleSelectionAndHandlesAnAlreadyCachedList() {
+        val visible = WorkstationTrack(id = "visible", kind = "bilibili", bvid = bvid)
+        assertEquals(listOf(visible), pendingLocalDownloads(listOf(visible), mapOf("outside-selection" to "缓存失败，点击重试")))
+        assertTrue(pendingLocalDownloads(listOf(visible), mapOf("visible" to "已完整缓存")).isEmpty())
+        assertTrue(pendingLocalDownloads(emptyList(), emptyMap()).isEmpty())
+    }
+
     @Test fun importKeepsMetadataAndRequestedPartWithoutDownloadingAudio() {
         MockWebServer().use { server ->
             server.enqueue(response(view))

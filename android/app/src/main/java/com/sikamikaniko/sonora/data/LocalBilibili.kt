@@ -74,6 +74,13 @@ fun WorkstationTrack.playableIn(server: String): Boolean = if (server.isBlank())
 fun WorkstationTrack.artworkIn(server: String): String? = if (server.isBlank()) LocalMusicSources.artwork(this)
     else server.toHttpUrlOrNull()?.let(::coverUrl)
 
+fun pendingLocalDownloads(tracks: List<WorkstationTrack>, statuses: Map<String, String>): List<WorkstationTrack> =
+    tracks.filter { track ->
+        val status = statuses[track.id]
+        track.id.isNotBlank() && LocalMusicSources.playable(track) && status != "已完整缓存" &&
+            status != "等待缓存" && status != "清理缓存中" && status?.startsWith("缓存中 ") != true
+    }.distinctBy { it.id }
+
 class BilibiliException(message: String) : IOException(message)
 
 class LocalBilibiliClient(

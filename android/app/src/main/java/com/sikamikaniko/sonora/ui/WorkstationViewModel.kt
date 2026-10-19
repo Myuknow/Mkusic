@@ -21,6 +21,7 @@ import com.sikamikaniko.sonora.data.LocalMusicRepository
 import com.sikamikaniko.sonora.data.LocalBilibiliClient
 import com.sikamikaniko.sonora.data.BilibiliException
 import com.sikamikaniko.sonora.data.playableIn
+import com.sikamikaniko.sonora.data.pendingLocalDownloads
 import com.sikamikaniko.sonora.playback.LocalMusicDownloads
 import com.sikamikaniko.sonora.playback.PlaybackService
 import com.sikamikaniko.sonora.playback.WorkstationMedia
@@ -34,6 +35,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.yield
+import kotlinx.coroutines.ensureActive
 
 data class WorkstationPlayerState(
     val ready: Boolean = false, val track: WorkstationTrack? = null,
@@ -55,6 +58,7 @@ data class WorkstationState(
     val downloads: Map<String, String> = emptyMap(),
     val downloadBytes: Long = 0,
     val message: String? = null,
+    val addingDownloads: Boolean = false,
     val error: String? = null
 )
 
@@ -65,6 +69,7 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
     private val localRepository = LocalMusicRepository(application)
     private val bilibili = LocalBilibiliClient()
     private var requestJob: Job? = null
+    private var cacheBatchJob: Job? = null
     private val mutableState = MutableStateFlow(WorkstationState(standalone = app.standalone, connected = app.standalone))
     val state = mutableState.asStateFlow()
     private var controller: MediaController? = null
@@ -160,6 +165,7 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
 
     fun switchMode(standalone: Boolean) {
         if (app.standalone == standalone) return
+        cacheBatchJob?.cancel()
         requestJob?.cancel()
         pendingAction = null
         controller?.stop()
@@ -206,6 +212,7 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
 
     fun deleteLocal(track: WorkstationTrack) {
         if (!app.standalone) return
+        cacheBatchJob?.cancel()
         controller?.let { c ->
             for (i in c.mediaItemCount - 1 downTo 0) if (c.getMediaItemAt(i).mediaId == track.id) c.removeMediaItem(i)
         }
@@ -223,8 +230,37 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
         try { LocalMusicDownloads.enqueue(app, track); mutableState.value = mutableState.value.copy(message = "已加入完整缓存队列") }
         catch (_: Exception) { mutableState.value = mutableState.value.copy(error = "缓存任务启动失败，请返回前台重试") }
     }
+
+    fun cacheLocalList(tracks: List<WorkstationTrack>) {
+        if (!app.standalone || cacheBatchJob?.isActive == true) return
+        val selected = tracks.toList()
+        cacheBatchJob = viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(addingDownloads = true, error = null)
+            var added = 0
+            try {
+                val pending = withContext(Dispatchers.IO) {
+                    val known = localRepository.tracks().map { it.id }.toSet()
+                    pendingLocalDownloads(selected.filter { it.id in known }, LocalMusicDownloads.statuses(app))
+                }
+                pending.forEachIndexed { index, track ->
+                    ensureActive()
+                    if (!app.standalone) return@launch
+                    LocalMusicDownloads.enqueue(app, track)
+                    added++
+                    if ((index + 1) % 10 == 0) yield()
+                }
+                mutableState.value = mutableState.value.copy(
+                    downloads = mutableState.value.downloads + pending.associate { it.id to "等待缓存" },
+                    message = if (added == 0) "当前列表已缓存或已在队列中" else "已将 $added 首歌曲加入完整缓存队列，已缓存或排队的歌曲自动跳过")
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                mutableState.value = mutableState.value.copy(error = "已加入 $added 首，其余歌曲加入缓存失败，请重试")
+            } finally { mutableState.value = mutableState.value.copy(addingDownloads = false) }
+        }
+    }
     fun clearLocalCache() {
         if (!app.standalone) return
+        cacheBatchJob?.cancel()
         controller?.pause()
         controller?.stop()
         viewModelScope.launch {

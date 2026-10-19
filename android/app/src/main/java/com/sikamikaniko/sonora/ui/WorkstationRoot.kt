@@ -31,6 +31,7 @@ import coil.compose.AsyncImage
 import com.sikamikaniko.sonora.data.WorkstationTrack
 import com.sikamikaniko.sonora.data.playableIn
 import com.sikamikaniko.sonora.data.artworkIn
+import com.sikamikaniko.sonora.data.pendingLocalDownloads
 import com.sikamikaniko.sonora.BuildConfig
 import com.sikamikaniko.sonora.R
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -146,11 +147,17 @@ fun WorkstationRoot(vm: WorkstationViewModel) {
                     Text("${filtered.size} 首歌曲${if (state.cached) " · 显示上次同步的音乐库" else ""}",
                         style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-                    TextButton(onClick = {
-                        filtered.firstOrNull { it.playableIn(state.server) }?.let { vm.play(filtered, it.id) }
-                    }, enabled = filtered.any { it.playableIn(state.server) },
-                        modifier = Modifier.padding(horizontal = 12.dp)) {
-                        Icon(Icons.Rounded.PlayArrow, null); Text("播放当前列表")
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                        TextButton(onClick = {
+                            filtered.firstOrNull { it.playableIn(state.server) }?.let { vm.play(filtered, it.id) }
+                        }, enabled = filtered.any { it.playableIn(state.server) }) {
+                            Icon(Icons.Rounded.PlayArrow, null); Text("播放当前列表")
+                        }
+                        if (state.standalone) TextButton(onClick = { vm.cacheLocalList(filtered) },
+                            enabled = !state.busy && !state.addingDownloads && pendingLocalDownloads(filtered, state.downloads).isNotEmpty()) {
+                            Icon(Icons.Rounded.Download, null)
+                            Text(if (state.addingDownloads) "加入队列中…" else "一键缓存")
+                        }
                     }
                     if (filtered.isEmpty() && !state.busy) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(if (state.tracks.isEmpty() && state.standalone) "点右上角 +，添加 BV 号或公开收藏夹链接"
