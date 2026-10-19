@@ -54,7 +54,6 @@ fun LocalMusicEditDialog(track: WorkstationTrack, dismiss: () -> Unit, save: (St
 @Composable
 fun LocalMusicSettings(state: WorkstationState, serverMode: () -> Unit, clearCache: () -> Unit) {
     var clearing by remember { mutableStateOf(false) }
-    val uriHandler = LocalUriHandler.current
     LazyColumn(contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         item {
             Text("手机独立模式", style = MaterialTheme.typography.titleLarge)
@@ -64,18 +63,25 @@ fun LocalMusicSettings(state: WorkstationState, serverMode: () -> Unit, clearCac
         item {
             Text("音频缓存", style = MaterialTheme.typography.titleMedium)
             Text("已完整缓存 ${state.downloads.count { it.value == "已完整缓存" }} 首 · %.1f MB".format(state.downloadBytes / 1048576.0))
-            Text("播放时自动缓存已读取的音频，最多 1 GB。需要离线播放时，在歌曲菜单中选择「完整缓存」，等待显示「已完整缓存」。完整缓存会保留到手动清理。",
+            Text("播放时自动缓存已读取的音频，最多 3 GB。需要离线播放时，在歌曲菜单中选择「完整缓存」，等待显示「已完整缓存」。完整缓存会保留到手动清理。",
                 style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = { clearing = true }) { Text("清理手机音频缓存") }
         }
         item { OutlinedButton(onClick = serverMode) { Text("连接自己的音乐服务器") } }
         item {
             Text("Mkusic ${BuildConfig.VERSION_NAME} · 基于 Sonora · MIT License", style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = { uriHandler.openUri("https://github.com/SikamikanikoBG/Sonora") }) { Text("Sonora 原作者") }
+            ProjectLinks()
         }
     }
     if (clearing) AlertDialog(onDismissRequest = { clearing = false }, title = { Text("清理音频缓存") },
         text = { Text("将停止当前播放并清理手机上的音频缓存，歌曲列表和分组会保留。") },
         confirmButton = { TextButton(onClick = { clearing = false; clearCache() }) { Text("清理") } },
         dismissButton = { TextButton(onClick = { clearing = false }) { Text("取消") } })
+}
+
+@Composable
+internal fun ProjectLinks() {
+    val uriHandler = LocalUriHandler.current
+    TextButton(onClick = { uriHandler.openUri("https://github.com/Myuknow/Mkusic") }) { Text("Mkusic 项目主页") }
+    TextButton(onClick = { uriHandler.openUri("https://github.com/SikamikanikoBG/Sonora") }) { Text("Sonora 原作者") }
 }

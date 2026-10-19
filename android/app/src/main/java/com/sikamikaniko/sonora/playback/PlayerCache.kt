@@ -14,7 +14,7 @@ import java.io.File
  */
 object PlayerCache {
 
-    private const val MAX_BYTES = 1024L * 1024L * 1024L // 1 GB
+    private const val MAX_BYTES = 3L * 1024L * 1024L * 1024L // 3 GB
 
     @Volatile private var instance: SimpleCache? = null
 

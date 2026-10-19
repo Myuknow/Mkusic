@@ -260,7 +260,10 @@ private fun ConnectionSettings(state: WorkstationState, disconnect: () -> Unit) 
         item { OutlinedButton(onClick = disconnect) {
             Icon(Icons.AutoMirrored.Rounded.ExitToApp, null); Spacer(Modifier.width(8.dp)); Text("断开连接并清除保存的密码")
         } }
-        item { Text("Mkusic ${BuildConfig.VERSION_NAME}\n基于 Sonora · MIT License",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item {
+            Text("Mkusic ${BuildConfig.VERSION_NAME}\n基于 Sonora · MIT License",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            ProjectLinks()
+        }
     }
 }
