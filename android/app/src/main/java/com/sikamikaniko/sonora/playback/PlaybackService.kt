@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -18,6 +19,8 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.CacheBitmapLoader
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.sikamikaniko.sonora.MainActivity
@@ -27,6 +30,8 @@ import com.sikamikaniko.sonora.data.WorkstationPlaybackStore
 import com.sikamikaniko.sonora.data.WorkstationRepository
 import com.sikamikaniko.sonora.data.LocalMusicRepository
 import com.sikamikaniko.sonora.data.LocalBilibiliClient
+import com.sikamikaniko.sonora.data.WorkstationPlaybackMode
+import com.sikamikaniko.sonora.data.randomizedQueue
 
 /**
  * Foreground media service. Media3 handles the notification and lock-screen
@@ -37,6 +42,8 @@ class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
     private lateinit var store: WorkstationPlaybackStore
+    private var randomQueue = false
+    private var reorderingQueue = false
     private val handler = Handler(Looper.getMainLooper())
     private val saveProgress = object : Runnable {
         override fun run() {
@@ -48,7 +55,36 @@ class PlaybackService : MediaSessionService() {
     private fun persistPosition() {
         mediaSession?.player?.let { p ->
             if (p.mediaItemCount > 0) store.savePosition(p.currentMediaItemIndex,
-                p.currentPosition, p.repeatMode, p.shuffleModeEnabled)
+                p.currentPosition, p.repeatMode, randomQueue)
+        }
+    }
+
+    private fun persistQueue() {
+        val app = application as SonoraApp
+        val connection = if (app.standalone) null else app.connection
+        if (!app.standalone && connection == null) return
+        val player = mediaSession?.player ?: return
+        val queue = (0 until player.mediaItemCount).mapNotNull { WorkstationMedia.track(player.getMediaItemAt(it)) }
+        if (queue.isEmpty()) store.clear() else store.saveQueue(connection, queue)
+        persistPosition()
+    }
+
+    private fun reshuffleQueue(player: Player) {
+        val order = randomizedQueue((0 until player.mediaItemCount).toList(), player.currentMediaItemIndex)
+        val positions = (0 until player.mediaItemCount).toMutableList()
+        // Moving items retains the current stream, its buffered audio and playback position.
+        reorderingQueue = true
+        try {
+            order.forEachIndexed { target, originalIndex ->
+                val from = positions.indexOf(originalIndex)
+                if (from != target) {
+                    player.moveMediaItem(from, target)
+                    positions.add(target, positions.removeAt(from))
+                }
+            }
+        } finally {
+            reorderingQueue = false
+            persistQueue()
         }
     }
 
@@ -112,6 +148,38 @@ class PlaybackService : MediaSessionService() {
             .setSessionActivity(sessionActivity)
             .setBitmapLoader(artwork)
             .setCallback(object : MediaSession.Callback {
+                override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
+                    val defaults = super.onConnect(session, controller)
+                    return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                        .setAvailableSessionCommands(defaults.availableSessionCommands.buildUpon()
+                            .add(SessionCommand(WorkstationMedia.SET_PLAYBACK_MODE, Bundle.EMPTY))
+                            .add(SessionCommand(WorkstationMedia.RESHUFFLE_QUEUE, Bundle.EMPTY)).build())
+                        .setAvailablePlayerCommands(defaults.availablePlayerCommands.buildUpon()
+                            .remove(Player.COMMAND_SET_SHUFFLE_MODE).build()).build()
+                }
+
+                override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo,
+                    customCommand: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
+                    when (customCommand.customAction) {
+                        WorkstationMedia.SET_PLAYBACK_MODE -> {
+                            val mode = WorkstationPlaybackMode.entries.firstOrNull { it.name == args.getString(WorkstationMedia.MODE) }
+                                ?: return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_BAD_VALUE))
+                            val needsShuffle = mode.randomQueue && !randomQueue
+                            randomQueue = mode.randomQueue
+                            session.sessionExtras = Bundle(session.sessionExtras).apply { putBoolean(WorkstationMedia.RANDOM_QUEUE, randomQueue) }
+                            session.player.shuffleModeEnabled = false
+                            session.player.repeatMode = mode.repeatMode
+                            if (needsShuffle) reshuffleQueue(session.player)
+                            persistPosition()
+                        }
+                        WorkstationMedia.RESHUFFLE_QUEUE -> {
+                            if (randomQueue) reshuffleQueue(session.player)
+                        }
+                        else -> return super.onCustomCommand(session, controller, customCommand, args)
+                    }
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+
                 override fun onAddMediaItems(session: MediaSession, controller: MediaSession.ControllerInfo,
                     mediaItems: List<MediaItem>): ListenableFuture<List<MediaItem>> {
                     val connection = if (app.standalone) null else app.connection
@@ -143,16 +211,14 @@ class PlaybackService : MediaSessionService() {
         val activeConnection = if (app.standalone) null else app.connection
         val available = if (app.standalone) LocalMusicRepository(this).tracks().map { it.id }.toSet() else null
         val saved = if (app.standalone || activeConnection != null) store.load(activeConnection)?.playable(activeConnection, available) else null
+        randomQueue = saved?.shuffle ?: false
+        mediaSession!!.sessionExtras = Bundle().apply { putBoolean(WorkstationMedia.RANDOM_QUEUE, randomQueue) }
         player.addListener(object : Player.Listener {
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-                val connection = if (app.standalone) null else app.connection
-                if (!app.standalone && connection == null) return
-                val queue = (0 until player.mediaItemCount).mapNotNull { WorkstationMedia.track(player.getMediaItemAt(it)) }
-                if (queue.isEmpty()) store.clear() else store.saveQueue(connection, queue)
-                persistPosition()
+                if (!reorderingQueue) persistQueue()
             }
 
-            override fun onEvents(player: Player, events: Player.Events) { persistPosition() }
+            override fun onEvents(player: Player, events: Player.Events) { if (!reorderingQueue) persistPosition() }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (playWhenReady && player.playbackState == Player.STATE_IDLE && player.playerError == null && player.mediaItemCount > 0) {
@@ -162,7 +228,7 @@ class PlaybackService : MediaSessionService() {
         })
         if (saved != null) {
             player.repeatMode = saved.repeatMode
-            player.shuffleModeEnabled = saved.shuffle
+            player.shuffleModeEnabled = false
             player.setMediaItems(saved.tracks.map { WorkstationMedia.item(it, activeConnection) }, saved.index, saved.positionMs)
             // Restore paused. Playback starts only after an explicit play command.
         }

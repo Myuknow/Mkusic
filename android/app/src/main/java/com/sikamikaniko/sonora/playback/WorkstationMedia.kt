@@ -10,6 +10,10 @@ import com.sikamikaniko.sonora.data.WorkstationTrack
 import com.sikamikaniko.sonora.data.LocalMusicSources
 
 object WorkstationMedia {
+    const val SET_PLAYBACK_MODE = "mkusic.SET_PLAYBACK_MODE"
+    const val RESHUFFLE_QUEUE = "mkusic.RESHUFFLE_QUEUE"
+    const val RANDOM_QUEUE = "mkusic.randomQueue"
+    const val MODE = "mode"
     private const val TRACK = "workstation.track"
     private val gson = Gson()
 

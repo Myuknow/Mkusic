@@ -2,6 +2,7 @@ package com.sikamikaniko.sonora.data
 
 import org.junit.Assert.*
 import org.junit.Test
+import kotlin.random.Random
 
 class WorkstationPlaybackTest {
     private val connection = ServerConnection.create("https://example.com/music/", "test-only-password")
@@ -54,5 +55,34 @@ class WorkstationPlaybackTest {
         val restored = WorkstationPlaybackSnapshot(listOf(video), positionMs = -2, repeatMode = 7).playable(connection)!!
         assertEquals(0L, restored.positionMs)
         assertEquals(0, restored.repeatMode)
+    }
+
+    @Test fun shuffleModeLoopsTheQueueAndSwitchingToSingleDisablesShuffle() {
+        val random = WorkstationPlaybackMode.SHUFFLE
+        assertTrue(random.randomQueue)
+        assertEquals(2, random.repeatMode)
+        val restored = WorkstationPlaybackSnapshot(listOf(video), repeatMode = random.repeatMode, shuffle = random.randomQueue)
+            .playable(connection)!!
+        assertEquals(random, WorkstationPlaybackMode.from(restored.repeatMode, restored.shuffle))
+        assertFalse(WorkstationPlaybackMode.REPEAT_ONE.randomQueue)
+        assertEquals(1, WorkstationPlaybackMode.REPEAT_ONE.repeatMode)
+        // Older versions allowed shuffle + single-repeat together; the label must reflect actual repeat behavior.
+        assertEquals(WorkstationPlaybackMode.REPEAT_ONE, WorkstationPlaybackMode.from(1, true))
+        assertEquals(random, WorkstationPlaybackMode.from(0, true))
+        assertEquals(WorkstationPlaybackMode.SEQUENTIAL, WorkstationPlaybackMode.from(0, false))
+    }
+
+    @Test fun randomQueueIsACompleteVisiblePermutationWithCurrentTrackFirst() {
+        val tracks = (1..20).map { video.copy(id = "song-$it") }
+        val shuffled = randomizedQueue(tracks, 7, Random(42))
+        assertEquals(tracks[7], shuffled.first())
+        assertEquals(tracks.size, shuffled.size)
+        assertEquals(tracks.toSet(), shuffled.toSet())
+        assertNotEquals(tracks.filterIndexed { index, _ -> index != 7 }, shuffled.drop(1))
+        val restored = WorkstationPlaybackSnapshot(shuffled, shuffle = true, repeatMode = 2).playable(connection)!!
+        assertEquals(shuffled, restored.tracks)
+        assertNotEquals(shuffled, randomizedQueue(shuffled, 0, Random(73)))
+        assertTrue(randomizedQueue(emptyList<Int>(), -1).isEmpty())
+        assertEquals(listOf(1), randomizedQueue(listOf(1), 0))
     }
 }

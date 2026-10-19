@@ -3,6 +3,30 @@ package com.sikamikaniko.sonora.data
 import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import androidx.media3.common.Player
+import kotlin.random.Random
+
+enum class WorkstationPlaybackMode(val label: String, val repeatMode: Int, val randomQueue: Boolean) {
+    SEQUENTIAL("顺序播放", Player.REPEAT_MODE_OFF, false),
+    LIST_LOOP("列表循环", Player.REPEAT_MODE_ALL, false),
+    SHUFFLE("随机播放", Player.REPEAT_MODE_ALL, true),
+    REPEAT_ONE("单曲循环", Player.REPEAT_MODE_ONE, false);
+
+    companion object {
+        fun from(repeatMode: Int, shuffle: Boolean): WorkstationPlaybackMode = when {
+            repeatMode == Player.REPEAT_MODE_ONE -> REPEAT_ONE
+            shuffle -> SHUFFLE
+            repeatMode == Player.REPEAT_MODE_ALL -> LIST_LOOP
+            else -> SEQUENTIAL
+        }
+    }
+}
+
+/** Materialize the queue once; the player then walks this exact visible order. */
+fun <T> randomizedQueue(items: List<T>, currentIndex: Int, random: Random = Random.Default): List<T> =
+    if (currentIndex in items.indices) listOf(items[currentIndex]) +
+        items.filterIndexed { index, _ -> index != currentIndex }.shuffled(random)
+    else items.shuffled(random)
 
 data class WorkstationPlaybackSnapshot(
     val tracks: List<WorkstationTrack>, val index: Int = 0, val positionMs: Long = 0,

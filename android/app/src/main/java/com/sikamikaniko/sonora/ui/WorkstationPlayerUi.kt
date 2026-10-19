@@ -23,9 +23,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.sikamikaniko.sonora.data.artworkIn
+import com.sikamikaniko.sonora.data.WorkstationPlaybackMode
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
 @Composable
@@ -92,6 +92,8 @@ private fun PlayerArtwork(state: WorkstationPlayerState, server: String, modifie
 @Composable
 private fun PlayerControls(state: WorkstationPlayerState, vm: WorkstationViewModel, onQueue: () -> Unit) {
     var dragged by remember(state.track?.id) { mutableStateOf<Float?>(null) }
+    var showModes by remember { mutableStateOf(false) }
+    val mode = WorkstationPlaybackMode.from(state.repeat, state.shuffle)
     val duration = state.durationMs.coerceAtLeast(1).toFloat()
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(state.track?.displayTitle.orEmpty(), style = MaterialTheme.typography.titleLarge,
@@ -120,16 +122,34 @@ private fun PlayerControls(state: WorkstationPlayerState, vm: WorkstationViewMod
             IconButton(onClick = vm::next, enabled = canNext(state)) { Icon(Icons.Rounded.SkipNext, "下一首", Modifier.size(32.dp)) }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = vm::toggleShuffle) { Icon(Icons.Rounded.Shuffle, if (state.shuffle) "关闭随机播放" else "随机播放",
-                tint = if (state.shuffle) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
-            TextButton(onClick = vm::cycleRepeat) {
-                Icon(if (state.repeat == Player.REPEAT_MODE_ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, null)
-                Spacer(Modifier.width(4.dp)); Text(when (state.repeat) { Player.REPEAT_MODE_ONE -> "单曲循环"; Player.REPEAT_MODE_ALL -> "列表循环"; else -> "顺序播放" })
+            Box {
+                TextButton(onClick = { showModes = true }, modifier = Modifier.semantics {
+                    contentDescription = "播放模式：${mode.label}，点击切换"
+                }) {
+                    Icon(playbackModeIcon(mode), null)
+                    Spacer(Modifier.width(6.dp)); Text(mode.label)
+                    Icon(Icons.Rounded.ArrowDropDown, null)
+                }
+                DropdownMenu(expanded = showModes, onDismissRequest = { showModes = false }) {
+                    WorkstationPlaybackMode.entries.forEach { option ->
+                        DropdownMenuItem(text = { Text(option.label) },
+                            leadingIcon = { Icon(playbackModeIcon(option), null) },
+                            trailingIcon = { if (mode == option) Icon(Icons.Rounded.Check, "当前模式") },
+                            onClick = { showModes = false; vm.setPlaybackMode(option) })
+                    }
+                }
             }
             IconButton(onClick = onQueue) { Icon(Icons.AutoMirrored.Rounded.QueueMusic, "播放队列（${state.queue.size} 首）") }
         }
         if (state.error != null) TextButton(onClick = vm::retryPlayback) { Text("重试播放") }
     }
+}
+
+private fun playbackModeIcon(mode: WorkstationPlaybackMode) = when (mode) {
+    WorkstationPlaybackMode.SEQUENTIAL -> Icons.Rounded.PlaylistPlay
+    WorkstationPlaybackMode.LIST_LOOP -> Icons.Rounded.Repeat
+    WorkstationPlaybackMode.SHUFFLE -> Icons.Rounded.Shuffle
+    WorkstationPlaybackMode.REPEAT_ONE -> Icons.Rounded.RepeatOne
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,6 +158,10 @@ fun WorkstationQueueSheet(state: WorkstationPlayerState, vm: WorkstationViewMode
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("播放队列 · ${state.queue.size} 首", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+            if (state.shuffle) TextButton(onClick = vm::reshuffleQueue, enabled = state.queue.size > 1) {
+                Icon(Icons.Rounded.Shuffle, null)
+                Text("重新打乱")
+            }
             IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, "关闭队列") }
         }
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp), contentPadding = PaddingValues(bottom = 24.dp)) {

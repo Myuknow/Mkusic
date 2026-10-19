@@ -3,10 +3,12 @@ package com.sikamikaniko.sonora.ui
 import android.app.Application
 import android.content.ComponentName
 import android.content.Intent
+import android.os.Bundle
 import androidx.core.content.ContextCompat
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import androidx.media3.session.SessionCommand
 import com.google.common.util.concurrent.ListenableFuture
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -17,6 +19,8 @@ import com.sikamikaniko.sonora.data.WorkstationErrors
 import com.sikamikaniko.sonora.data.WorkstationRepository
 import com.sikamikaniko.sonora.data.WorkstationTrack
 import com.sikamikaniko.sonora.data.WorkstationPlaybackStore
+import com.sikamikaniko.sonora.data.WorkstationPlaybackMode
+import com.sikamikaniko.sonora.data.randomizedQueue
 import com.sikamikaniko.sonora.data.LocalMusicRepository
 import com.sikamikaniko.sonora.data.LocalBilibiliClient
 import com.sikamikaniko.sonora.data.BilibiliException
@@ -298,6 +302,7 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
         controller?.let { releaseController() }
         val token = SessionToken(app, ComponentName(app, PlaybackService::class.java))
         val future = MediaController.Builder(app, token).setListener(object : MediaController.Listener {
+            override fun onExtrasChanged(controller: MediaController, extras: Bundle) { updatePlayer() }
             override fun onDisconnected(disconnected: MediaController) {
                 // A disconnected MediaController silently ignores all transport commands.
                 // Keep the displayed queue until a fresh service/controller restores it.
@@ -338,7 +343,7 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
             buffering = c.playbackState == Player.STATE_BUFFERING,
             positionMs = c.currentPosition.coerceAtLeast(0), durationMs = c.duration.coerceAtLeast(0),
             seekable = c.isCurrentMediaItemSeekable, canSkipNext = c.hasNextMediaItem(),
-            repeat = c.repeatMode, shuffle = c.shuffleModeEnabled,
+            repeat = c.repeatMode, shuffle = c.sessionExtras.getBoolean(WorkstationMedia.RANDOM_QUEUE),
             error = c.playerError?.let { WorkstationStreaming.errorMessage(it, app.standalone) })
     }
 
@@ -351,7 +356,9 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
         withController { c ->
-            c.setMediaItems(queue.map { WorkstationMedia.item(it, connection) }, index, 0)
+            val random = c.sessionExtras.getBoolean(WorkstationMedia.RANDOM_QUEUE)
+            val ordered = if (random) randomizedQueue(queue, index) else queue
+            c.setMediaItems(ordered.map { WorkstationMedia.item(it, connection) }, if (random) 0 else index, 0)
             c.prepare()
             c.play()
         }
@@ -396,12 +403,14 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
     fun seek(positionMs: Long) { withController { c -> if (c.isCurrentMediaItemSeekable) c.seekTo(positionMs.coerceIn(0, c.duration.coerceAtLeast(0))) } }
     fun selectQueued(index: Int) { withController { c -> if (index in 0 until c.mediaItemCount) { c.seekTo(index, 0); c.prepare(); c.play() } } }
     fun removeQueued(index: Int) { withController { if (index in 0 until it.mediaItemCount) it.removeMediaItem(index) } }
-    fun toggleShuffle() { withController { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
-    fun cycleRepeat() { withController { it.repeatMode = when (it.repeatMode) {
-        Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
-        Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
-        else -> Player.REPEAT_MODE_OFF
-    } } }
+    fun setPlaybackMode(mode: WorkstationPlaybackMode) { withController {
+        it.sendCustomCommand(SessionCommand(WorkstationMedia.SET_PLAYBACK_MODE, Bundle.EMPTY),
+            Bundle().apply { putString(WorkstationMedia.MODE, mode.name) })
+    } }
+
+    fun reshuffleQueue() { withController {
+        it.sendCustomCommand(SessionCommand(WorkstationMedia.RESHUFFLE_QUEUE, Bundle.EMPTY), Bundle.EMPTY)
+    } }
 
     private fun releaseController() {
         val previous = controller
