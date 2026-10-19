@@ -1,7 +1,7 @@
-// Music-specific Bilibili functions extracted from workstation-dashboard/server.js.
+// Music-specific Bilibili helpers backing the audio cache.
 const crypto = require('node:crypto');
 const { AudioCache, trackSource } = require('./audio-cache');
-const BILI_HEADERS = { 'User-Agent': 'Mozilla/5.0 WorkstationMusic/1.0', Referer: 'https://www.bilibili.com/' };
+const BILI_HEADERS = { 'User-Agent': 'Mozilla/5.0 Mkusic/1.0', Referer: 'https://www.bilibili.com/' };
 function needsMetadata(track) {
   return ['bilibili', 'biliaudio'].includes(track.kind) &&
     (!String(track.title || '').trim() || /^(?:B站(?:视频音频|视频|音频)?\s*[·:：-]?\s*)?(?:BV[0-9a-z]{10}|av\d+|au\d+)$/i.test(String(track.title).trim()));

@@ -4,13 +4,13 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { createMusicServer } = require('../server');
-const { migrate } = require('../scripts/import-workstation');
+const { migrate } = require('../scripts/import-legacy');
 
 const password = 'test-only:music-password';
 const auth = 'Basic ' + Buffer.from(':' + password).toString('base64');
 
 async function fixture(t, options = {}) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'workstation-music-test-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mkusic-test-'));
   const app = await createMusicServer({ password, dataDir: path.join(dir, 'data'), ...options });
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${app.server.address().port}`;
@@ -18,7 +18,7 @@ async function fixture(t, options = {}) {
     await new Promise(resolve => { app.server.close(resolve); app.server.closeAllConnections(); });
     await app.cache.close();
     await app.store.queue;
-    assert.ok(path.resolve(dir).startsWith(path.join(path.resolve(os.tmpdir()), 'workstation-music-test-')));
+    assert.ok(path.resolve(dir).startsWith(path.join(path.resolve(os.tmpdir()), 'mkusic-test-')));
     await fs.rm(dir, { recursive: true, force: true });
   });
   return { ...app, dir, base, request: (url, options = {}) => fetch(base + url, { ...options, headers: { Authorization: auth, ...options.headers } }) };
@@ -57,7 +57,7 @@ test('App contract: authentication also required on loopback, raw playlist array
   assert.equal((await app.request('/api/playlist', { method: 'PUT', body: '{bad' })).status, 400);
   assert.equal((await playlist(app, {})).status, 400);
   const health = await (await app.request('/api/health')).json();
-  assert.equal(health.app, 'workstation-music'); assert.equal(health.tracks, 1);
+  assert.equal(health.app, 'mkusic'); assert.equal(health.tracks, 1);
 });
 
 test('uploaded audio supports complete bytes, first/middle/suffix/zero-ended ranges, HEAD and 416', async t => {
@@ -94,7 +94,7 @@ test('music backup restores audio and rejects incomplete/malicious imports witho
   const track = { id: 'local-track', kind: 'local', audioId: record.id, title: '音乐备份', url: record.url };
   await playlist(app, [track]);
   const backup = await (await app.request('/api/export')).json();
-  assert.equal(backup.app, 'workstation-music'); assert.deepEqual(Object.keys(backup.db).sort(), ['audio', 'playlist']);
+  assert.equal(backup.app, 'mkusic'); assert.deepEqual(Object.keys(backup.db).sort(), ['audio', 'playlist']);
   await playlist(app, []);
   const restore = await app.request('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backup) });
   assert.equal(restore.status, 200); assert.equal((await restore.json()).tracks, 1);
@@ -197,7 +197,7 @@ test('upstream stream interruption fails only the request and music service rema
 
 test('migration copies only music, leaves source untouched and refuses an occupied destination', async t => {
   const app = await fixture(t);
-  const source = path.join(app.dir, 'old-workstation'); const sourceData = path.join(source, 'data');
+  const source = path.join(app.dir, 'legacy-library'); const sourceData = path.join(source, 'data');
   await fs.mkdir(path.join(sourceData, 'uploads'), { recursive: true });
   await fs.writeFile(path.join(sourceData, 'uploads', 'music.wav'), 'music-bytes');
   await fs.writeFile(path.join(sourceData, 'uploads', 'private.txt'), 'private document');

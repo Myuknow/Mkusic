@@ -74,14 +74,14 @@ class MusicStore {
     const uploads = await Promise.all(db.audio.map(async item => ({
       name: safeFile(item.storedName), data: (await fs.readFile(path.join(this.uploads, safeFile(item.storedName)))).toString('base64')
     })));
-    return { app: 'workstation-music', version: 1, exportedAt: new Date().toISOString(), db, uploads };
+    return { app: 'mkusic', version: 1, exportedAt: new Date().toISOString(), db, uploads };
   }
 
   async import(payload) {
     const source = payload?.db ?? payload;
     const playlist = normalizePlaylist(source?.playlist);
     const required = new Set(playlist.filter(item => item.kind === 'local').map(item => item.audioId || item.blobId || /\/api\/audio\/([^/]+)\/open/.exec(item.url || '')?.[1]).filter(Boolean));
-    const audio = (Array.isArray(source.audio) ? source.audio : []).filter(item => payload.app === 'workstation-music' || required.has(item.id)).map(item => ({
+    const audio = (Array.isArray(source.audio) ? source.audio : []).filter(item => (payload.app === 'mkusic' || payload.app === 'workstation-music') || required.has(item.id)).map(item => ({
       id: String(item.id), title: String(item.title || ''), originalName: String(item.originalName || ''),
       storedName: safeFile(item.storedName), type: String(item.type || 'audio/mpeg'), size: Number(item.size || 0),
       createdAt: item.createdAt || new Date().toISOString(), url: `/api/audio/${encodeURIComponent(item.id)}/open`

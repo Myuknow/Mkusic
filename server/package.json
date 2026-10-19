@@ -2,13 +2,13 @@
   "name": "mkusic-server",
   "version": "1.0.0",
   "private": true,
-  "description": "Standalone music library, web player and Android companion server extracted from workstation-dashboard.",
+  "description": "Standalone music library, web player and Android companion server for the Mkusic player.",
   "engines": { "node": ">=22" },
   "scripts": {
     "setup": "node scripts/setup.js",
     "start": "node server.js",
-    "check": "node --check server.js && node --check lib/store.js && node --check lib/bilibili.js && node --check lib/audio-cache.js && node --check lib/audio-file.js && node --check public/app.js && node --check scripts/setup.js && node --check scripts/import-workstation.js",
+    "check": "node --check server.js && node --check lib/store.js && node --check lib/bilibili.js && node --check lib/audio-cache.js && node --check lib/audio-file.js && node --check public/app.js && node --check scripts/setup.js && node --check scripts/import-legacy.js",
     "test": "npm run check && node --test test/*.test.js",
-    "import:workstation": "node scripts/import-workstation.js"
+    "import:legacy": "node scripts/import-legacy.js"
   }
 }

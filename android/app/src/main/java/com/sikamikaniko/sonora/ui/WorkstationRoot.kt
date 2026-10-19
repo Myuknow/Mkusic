@@ -153,7 +153,7 @@ private fun ConnectionForm(state: WorkstationState, connect: (String, String) ->
         verticalArrangement = Arrangement.spacedBy(20.dp)) {
         item { Spacer(Modifier.height(32.dp)) }
         item {
-            Image(painterResource(R.drawable.workstation_icon), contentDescription = "Mkusic 图标", modifier = Modifier.size(80.dp))
+            Image(painterResource(R.drawable.mkusic_icon), contentDescription = "Mkusic 图标", modifier = Modifier.size(80.dp))
             Spacer(Modifier.height(16.dp))
             Text("Mkusic", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(8.dp))

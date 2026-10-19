@@ -21,7 +21,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.myuknow.workstationmusic"
+        applicationId = "com.myuknow.mkusic"
         minSdk = 26
         targetSdk = 34
         versionCode = 5

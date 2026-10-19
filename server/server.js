@@ -92,7 +92,7 @@ async function createMusicServer(options) {
     const pathname = url.pathname;
     if (pathname === '/api/health' && method === 'GET') {
       const db = await store.read();
-      return json(res, 200, { ok: true, app: 'workstation-music', version: VERSION, tracks: db.playlist.length, audio: db.audio.length });
+      return json(res, 200, { ok: true, app: 'mkusic', version: VERSION, tracks: db.playlist.length, audio: db.audio.length });
     }
     if (pathname === '/api/playlist' && method === 'GET') return json(res, 200, (await store.read()).playlist);
     if (pathname === '/api/playlist' && method === 'PUT') {

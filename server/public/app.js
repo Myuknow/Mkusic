@@ -1,8 +1,8 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const audio = $('audio');
-const historyKey = 'workstationMusic.history';
-const modeKey = 'workstationMusic.mode';
+const historyKey = 'mkusic.history';
+const modeKey = 'mkusic.mode';
 const modes = ['none', 'all', 'one', 'random'];
 const modeNames = { none: '顺序播放', all: '列表循环', one: '单曲循环', random: '随机循环' };
 let playlist = [], selected = new Set(), currentId = '', order = [], busy = false, loadGeneration = 0, noticeTimer;

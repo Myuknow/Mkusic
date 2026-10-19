@@ -27,7 +27,7 @@ object WorkstationStreaming {
         // A stream may run for minutes. Read timeout remains bounded, total call time does not.
         val client = WorkstationHttp.client { app.connection }.newBuilder()
             .callTimeout(0, TimeUnit.MILLISECONDS).readTimeout(20, TimeUnit.SECONDS).build()
-        val http = OkHttpDataSource.Factory(client).setUserAgent("WorkstationMusic/0.2")
+        val http = OkHttpDataSource.Factory(client).setUserAgent("Mkusic/0.2")
         val resolver = ResolvingDataSource.Resolver { spec ->
             val requested = spec.uri.toString().toHttpUrlOrNull()
             val current = app.connection

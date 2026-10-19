@@ -1,13 +1,13 @@
-// Explicit, music-only migration. The original workstation is read-only.
+// Explicit, music-only migration. The source library is read-only.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { MusicStore, safeFile } = require('../lib/store');
 
 async function migrate(sourceRoot, targetDirectory) {
-  if (!sourceRoot) throw new Error('用法：npm run import:workstation -- --source 工作站目录 [--target 新项目data目录]');
+  if (!sourceRoot) throw new Error('用法：npm run import:legacy -- --source 旧音乐库目录 [--target 新项目data目录]');
   const sourceData = path.resolve(sourceRoot, 'data');
   const target = path.resolve(targetDirectory);
-  if (sourceData === target || target.startsWith(sourceData + path.sep)) throw new Error('目标目录不能位于原工作站 data 目录内');
+  if (sourceData === target || target.startsWith(sourceData + path.sep)) throw new Error('目标目录不能位于源 data 目录内');
   const db = JSON.parse(await fs.readFile(path.join(sourceData, 'db.json'), 'utf8'));
   const playlist = Array.isArray(db.playlist) ? db.playlist : [];
   const ids = new Set(playlist.filter(track => track.kind === 'local').map(track => track.audioId || track.blobId || /\/api\/audio\/([^/]+)\/open/.exec(track.url || '')?.[1]).filter(Boolean));
@@ -24,7 +24,7 @@ if (require.main === module) {
   const option = name => args[args.indexOf(name) + 1];
   const source = args.includes('--source') ? option('--source') : '';
   const target = args.includes('--target') ? option('--target') : path.join(__dirname, '..', 'data');
-  migrate(source, target).then(result => console.log(`仅迁移音乐：${result.tracks} 首、${result.audio} 个音频文件。原工作站未修改。`))
+  migrate(source, target).then(result => console.log(`仅迁移音乐：${result.tracks} 首、${result.audio} 个音频文件。源目录未修改。`))
     .catch(error => { console.error(error.message); process.exitCode = 1; });
 }
 module.exports = { migrate };
