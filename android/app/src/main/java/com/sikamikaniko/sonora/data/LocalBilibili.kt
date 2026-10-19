@@ -89,7 +89,9 @@ class LocalBilibiliClient(
     private val audioRoot: HttpUrl = "https://www.bilibili.com/".toHttpUrl()
 ) {
     companion object {
-        val headers = mapOf("User-Agent" to "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36 Mkusic/0.3",
+        // Some Bilibili CDNs reject the mobile/custom UA with 403 even for a fresh URL.
+        // Keep API resolution and media/download requests on the same browser headers.
+        val headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
             "Referer" to "https://www.bilibili.com/")
         fun httpClient(): OkHttpClient = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(25, TimeUnit.SECONDS).callTimeout(40, TimeUnit.SECONDS).followSslRedirects(false).build()

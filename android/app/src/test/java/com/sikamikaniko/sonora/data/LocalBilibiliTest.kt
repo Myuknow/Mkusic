@@ -2,8 +2,10 @@ package com.sikamikaniko.sonora.data
 
 import com.google.gson.JsonParser
 import okhttp3.Request
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -124,6 +126,35 @@ class LocalBilibiliTest {
         }
     }
 
+    @Test fun browserHeadersAvoidCdnRejectionAndPreserveByteRange() {
+        MockWebServer().use { server ->
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val userAgent = request.getHeader("User-Agent").orEmpty()
+                    if (userAgent.contains("Mobile") || userAgent.contains("Mkusic") ||
+                        !userAgent.contains("Chrome/") || request.getHeader("Referer") != "https://www.bilibili.com/") {
+                        return MockResponse().setResponseCode(403)
+                    }
+                    return MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 100-103/104")
+                        .setBody("test")
+                }
+            }
+            fun audioRequest(headers: Map<String, String>) = Request.Builder().url(server.url("/audio.m4s"))
+                .header("Range", "bytes=100-103").apply { headers.forEach { (k, v) -> header(k, v) } }.build()
+            val http = LocalBilibiliClient.httpClient()
+            http.newCall(audioRequest(LocalBilibiliClient.headers + ("User-Agent" to
+                "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36 Mkusic/0.3"))).execute().use {
+                assertEquals(403, it.code)
+            }
+            http.newCall(audioRequest(LocalBilibiliClient.headers)).execute().use {
+                assertEquals(206, it.code)
+                assertEquals("test", it.body!!.string())
+            }
+            server.takeRequest()
+            assertEquals("bytes=100-103", server.takeRequest().getHeader("Range"))
+        }
+    }
+
     @Test fun invalidJsonIsNotTreatedAsAnEmptyLibrary() {
         MockWebServer().use { server ->
             server.enqueue(response("<html>blocked</html>"))
@@ -151,17 +182,19 @@ class LocalBilibiliTest {
     }
 
     @Test fun livePublicAudioSmoke() {
-        val source = System.getenv("MKUSIC_BILI_SMOKE_BVID")
-        assumeTrue("Live smoke is opt-in; ordinary tests never contact Bilibili", !source.isNullOrBlank())
+        val sources = System.getenv("MKUSIC_BILI_SMOKE_BVID").orEmpty().split(',').map(String::trim).filter(String::isNotEmpty)
+        assumeTrue("Live smoke is opt-in; ordinary tests never contact Bilibili", sources.isNotEmpty())
         val client = LocalBilibiliClient()
-        val track = client.tracks(source!!).first()
-        val url = client.resolve(track)
-        val request = Request.Builder().url(url).header("Range", "bytes=0-16383")
-            .apply { LocalBilibiliClient.headers.forEach { (k, v) -> header(k, v) } }.build()
-        LocalBilibiliClient.httpClient().newCall(request).execute().use { response ->
-            assertTrue("Audio HTTP ${response.code}", response.isSuccessful)
-            assertTrue(response.body!!.byteStream().read(ByteArray(1024)) > 0)
-            assertFalse(response.header("Content-Type").orEmpty().contains("json"))
+        for (source in sources) {
+            val track = client.tracks(source).first()
+            val url = client.resolve(track)
+            val request = Request.Builder().url(url).header("Range", "bytes=0-255")
+                .apply { LocalBilibiliClient.headers.forEach { (k, v) -> header(k, v) } }.build()
+            LocalBilibiliClient.httpClient().newCall(request).execute().use { response ->
+                assertTrue("$source audio HTTP ${response.code}", response.isSuccessful)
+                assertTrue(response.body!!.byteStream().read(ByteArray(256)) > 0)
+                assertFalse(response.header("Content-Type").orEmpty().contains("json"))
+            }
         }
     }
 }
