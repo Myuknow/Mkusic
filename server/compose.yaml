@@ -1,0 +1,14 @@
+services:
+  music:
+    build: .
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4066
+      DATA_DIR: /app/data
+      AUDIO_CACHE_MAX_MB: ${AUDIO_CACHE_MAX_MB:-2048}
+      ACCESS_PASSWORD: ${ACCESS_PASSWORD:?请先运行 npm run setup 或自行创建 .env 并配置 ACCESS_PASSWORD}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-4066}:4066"
+    volumes:
+      - ./data:/app/data

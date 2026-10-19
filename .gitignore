@@ -1,0 +1,36 @@
+# Private runtime configuration and music data
+.env
+.env.*
+!.env.example
+/server/data/*
+!/server/data/.gitkeep
+certs/
+*.pem
+*.key
+*.crt
+*.jks
+*.keystore
+keystore.properties
+
+# Local builds and IDE files
+.gradle/
+.kotlin/
+.idea/
+build/
+local.properties
+*.iml
+.externalNativeBuild/
+.cxx/
+captures/
+node_modules/
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+
+# Downloadable artifacts belong in GitHub Releases
+releases/
+*.apk
+*.aab
+*.zip
+!gradle/wrapper/gradle-wrapper.jar

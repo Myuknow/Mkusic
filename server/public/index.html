@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark"><title>Mkusic · 我的音乐库</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><img src="/favicon.svg" alt="" width="40" height="40"><span>Mkusic<small>对B站特化的音乐播放器服务器版本(゜-゜)つロ</small></span></a>
+    <div class="header-actions"><span class="connection" id="connectionStatus">连接中</span><button id="connectApp">连接 App</button><button class="primary" id="openAdd">＋ 添加音乐</button></div>
+  </header>
+  <main>
+    <aside class="player panel" aria-label="音乐播放器">
+      <div class="artwork"><span aria-hidden="true">♪</span><img id="albumCover" alt="当前歌曲封面" hidden></div>
+      <p class="eyebrow">正在播放</p><h1 id="trackTitle">从喜欢的音乐开始</h1><p class="muted" id="trackArtist">添加音频、B站视频或公开收藏夹</p>
+      <div class="progress"><input id="progress" type="range" min="0" max="1000" value="0" aria-label="播放进度" disabled><div><span id="currentTime">0:00</span><span id="duration">0:00</span></div></div>
+      <div class="transport"><button id="previous" aria-label="上一首" disabled>⏮</button><button class="play" id="play" aria-label="播放" disabled>▶</button><button id="next" aria-label="下一首" disabled>⏭</button></div>
+      <div class="player-options"><button id="mode" aria-label="切换播放模式">顺序播放</button><label class="volume">音量<input id="volume" type="range" min="0" max="1" step="0.01" value="0.2" aria-label="音量"></label></div>
+      <p class="player-status" id="playerStatus" role="status">选择一首歌曲，在这里播放。</p><button id="retry" hidden>重试播放</button>
+      <audio id="audio" preload="metadata"></audio>
+    </aside>
+    <section class="library" aria-labelledby="libraryTitle">
+      <div class="section-heading"><div><p class="eyebrow">YOUR COLLECTION</p><h2 id="libraryTitle">我的音乐库 <span id="trackCount">0</span></h2></div><div class="library-actions"><button id="loadTitles">加载歌名</button><button id="refresh" aria-label="刷新音乐库">刷新</button></div></div>
+      <section class="panel cache-panel" aria-label="服务器歌曲缓存"><div><h3>服务器缓存</h3><p id="cacheStatus" class="muted" role="status">正在读取缓存状态…</p></div><button id="cacheSongs">缓存全部</button></section>
+      <div class="panel library-content">
+        <div class="filters"><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜索歌曲、歌手或 BV 号" aria-label="搜索音乐"></label><select id="groupFilter" aria-label="筛选分组"><option value="">全部分组</option></select></div>
+        <div class="selection-tools"><label><input id="selectAll" type="checkbox"> 全选</label><span class="muted" id="selectedCount">已选 0 首</span><button id="groupSelected" disabled>设置分组</button><button id="pinSelected" disabled>置顶</button><button class="danger" id="deleteSelected" disabled>删除</button></div>
+        <div id="playlist" class="playlist" aria-live="polite"></div>
+        <div class="empty" id="emptyState" hidden><span aria-hidden="true">♫</span><h3>让音乐住进来</h3><p>上传自己的音频，或添加 B站视频和公开收藏夹。</p><button class="primary" id="emptyAdd">添加第一首音乐</button></div>
+      </div>
+      <section class="panel history"><details><summary>最近播放 <span id="historyCount">0</span></summary><div id="historyList"></div></details></section>
+      <footer class="library-footer"><span>音乐保存在你的服务器，网页与 App 共用音乐库。</span><div><button id="export">导出音乐备份</button><label class="button" for="importFile">导入备份</label><input id="importFile" class="visually-hidden" type="file" accept="application/json,.json"></div></footer>
+    </section>
+  </main>
+  <p id="notice" class="notice" role="status" hidden></p>
+  <dialog id="addDialog">
+    <div class="dialog-heading"><h2>添加音乐</h2><button class="close" data-close="addDialog" aria-label="关闭添加音乐">×</button></div>
+    <section class="add-section"><h3>上传音频</h3><p class="muted">支持 MP3、FLAC、WAV、M4A 等，单个文件最大 128 MB。</p><label class="button" for="upload">选择音频文件</label><input id="upload" type="file" accept="audio/*,.flac,.m4a,.opus" multiple class="visually-hidden"></section>
+    <form id="addForm" class="add-section"><h3>添加链接</h3><label>链接或 B站编号<input id="trackUrl" placeholder="https://… / BV… / av… / au…" required></label><div class="form-row"><label>歌名（可选）<input id="newTitle" placeholder="自动获取 B站标题"></label><label>分组（可选）<input id="newGroup" placeholder="例如：通勤歌单"></label></div><button class="primary" type="submit">添加到音乐库</button></form>
+    <form id="favForm" class="add-section"><h3>导入 B站公开收藏夹</h3><label>收藏夹链接或 fid<input id="favUrl" placeholder="收藏夹链接 / fid / media_id" required></label><label>分组名（可选）<input id="favGroup" placeholder="默认使用收藏夹名称"></label><button type="submit">导入收藏夹</button></form>
+  </dialog>
+  <dialog id="groupDialog"><div class="dialog-heading"><h2>设置分组</h2><button class="close" data-close="groupDialog" aria-label="关闭分组设置">×</button></div><form id="groupForm"><label>分组名称<input id="groupName" placeholder="输入分组名，留空恢复默认分组"></label><button class="primary" type="submit">保存分组</button></form></dialog>
+  <dialog id="appDialog"><div class="dialog-heading"><h2>在手机上听</h2><button class="close" data-close="appDialog" aria-label="关闭 App 连接说明">×</button></div><p>在 Mkusic App 的连接页填写：</p><label>服务器地址<input id="serverAddress" readonly></label><button id="copyAddress">复制服务器地址</button></dialog>
+</body>
+</html>

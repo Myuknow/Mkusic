@@ -1,0 +1,4 @@
+# Replace with your own domain, point its DNS to your server, and allow ports 80/443.
+music.example.com {
+    reverse_proxy 127.0.0.1:4066
+}

@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+data/*
+!data/.gitkeep
+node_modules/
+certs/
+*.pem
+*.key
+*.log
+*.zip
+coverage/
