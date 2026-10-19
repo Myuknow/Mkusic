@@ -8,9 +8,10 @@ data class WorkstationPlaybackSnapshot(
     val tracks: List<WorkstationTrack>, val index: Int = 0, val positionMs: Long = 0,
     val repeatMode: Int = 0, val shuffle: Boolean = false
 ) {
-    fun playable(connection: ServerConnection): WorkstationPlaybackSnapshot? {
+    fun playable(connection: ServerConnection?, availableIds: Set<String>? = null): WorkstationPlaybackSnapshot? {
         val currentId = tracks.getOrNull(index)?.id
-        val valid = tracks.filter { it.streamUrl(connection.baseUrl) != null }
+        val valid = tracks.filter { (availableIds == null || it.id in availableIds) &&
+            if (connection == null) LocalMusicSources.playable(it) else it.streamUrl(connection.baseUrl) != null }
         if (valid.isEmpty()) return null
         val nextIndex = valid.indexOfFirst { it.id == currentId }.takeIf { it >= 0 } ?: 0
         return copy(tracks = valid, index = nextIndex,
@@ -24,8 +25,8 @@ class WorkstationPlaybackStore(context: Context) {
     private val prefs = context.getSharedPreferences("workstation_playback", Context.MODE_PRIVATE)
     private val gson = Gson()
 
-    fun saveQueue(connection: ServerConnection, tracks: List<WorkstationTrack>) {
-        prefs.edit().putString("server", connection.baseUrl.toString())
+    fun saveQueue(connection: ServerConnection?, tracks: List<WorkstationTrack>) {
+        prefs.edit().putString("server", connection?.baseUrl?.toString() ?: "mkusic:standalone")
             .putString("queue", gson.toJson(tracks)).apply()
     }
 
@@ -34,8 +35,8 @@ class WorkstationPlaybackStore(context: Context) {
             .putInt("repeat", repeat).putBoolean("shuffle", shuffle).apply()
     }
 
-    fun load(connection: ServerConnection): WorkstationPlaybackSnapshot? = try {
-        if (prefs.getString("server", null) != connection.baseUrl.toString()) null
+    fun load(connection: ServerConnection?): WorkstationPlaybackSnapshot? = try {
+        if (prefs.getString("server", null) != (connection?.baseUrl?.toString() ?: "mkusic:standalone")) null
         else prefs.getString("queue", null)?.let { json ->
             val type = object : TypeToken<List<WorkstationTrack>>() {}.type
             val tracks: List<WorkstationTrack>? = gson.fromJson(json, type)

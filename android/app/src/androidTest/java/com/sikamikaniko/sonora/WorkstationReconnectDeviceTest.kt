@@ -50,6 +50,8 @@ class WorkstationReconnectDeviceTest {
         val password = InstrumentationRegistry.getArguments().getString("workstationPassword")
         require(!password.isNullOrEmpty()) { "Provide workstationPassword at runtime" }
         val app = context.applicationContext as SonoraApp
+        val originalMode = app.standalone
+        app.standalone = false
         val connection = ServerConnection.create(testServerAddress(), password)
         val repository = WorkstationRepository(context)
         val credentials = CredentialStore(context)
@@ -125,6 +127,7 @@ class WorkstationReconnectDeviceTest {
         } finally {
             main { vm?.disconnect(); vmStore.clear(); context.stopService(Intent(context, PlaybackService::class.java)) }
             app.connection = null
+            app.standalone = originalMode
             credentials.clear(); repository.clear(); playbackStore.clear()
         }
     }

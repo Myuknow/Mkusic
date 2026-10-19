@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.sikamikaniko.sonora.data.WorkstationTrack
+import com.sikamikaniko.sonora.data.playableIn
+import com.sikamikaniko.sonora.data.artworkIn
 import com.sikamikaniko.sonora.BuildConfig
 import com.sikamikaniko.sonora.R
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -45,6 +47,14 @@ fun WorkstationRoot(vm: WorkstationViewModel) {
     var selectedGroup by rememberSaveable { mutableStateOf<String?>(null) }
     var showPlayer by rememberSaveable { mutableStateOf(false) }
     var showQueue by rememberSaveable { mutableStateOf(false) }
+    var showAdd by rememberSaveable { mutableStateOf(false) }
+    var offlineOnly by rememberSaveable { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<WorkstationTrack?>(null) }
+    var deleting by remember { mutableStateOf<WorkstationTrack?>(null) }
+    LaunchedEffect(state.standalone) {
+        settings = false; search = ""; selectedGroup = null; showPlayer = false; showQueue = false
+        offlineOnly = false; showAdd = false; editing = null; deleting = null
+    }
     LaunchedEffect(state.connected) {
         if (!state.connected) { settings = false; search = ""; selectedGroup = null; showPlayer = false; showQueue = false }
     }
@@ -52,8 +62,11 @@ fun WorkstationRoot(vm: WorkstationViewModel) {
     Scaffold(
         topBar = {
             if (state.connected) TopAppBar(
-                title = { Text(if (settings) "连接设置" else "我的音乐库") },
+                title = { Text(if (settings) "设置" else if (state.standalone) "手机音乐库" else "服务器音乐库") },
                 actions = {
+                    if (state.standalone) IconButton(onClick = { showAdd = true }, enabled = !state.busy) {
+                        Icon(Icons.Rounded.Add, "添加 B站音乐")
+                    }
                     IconButton(onClick = vm::refresh, enabled = !state.busy) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "刷新音乐库")
                     }
@@ -75,7 +88,7 @@ fun WorkstationRoot(vm: WorkstationViewModel) {
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (!state.connected) {
-                ConnectionForm(state, vm::connect)
+                ConnectionForm(state, vm::connect) { vm.switchMode(true) }
             } else {
                 player.error?.let { message ->
                     Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
@@ -93,17 +106,29 @@ fun WorkstationRoot(vm: WorkstationViewModel) {
                             Text(message, color = MaterialTheme.colorScheme.onErrorContainer)
                             Row {
                                 TextButton(onClick = vm::refresh, enabled = !state.busy) { Text("重试") }
-                                TextButton(onClick = vm::disconnect) { Text("重新连接") }
+                                if (!state.standalone) TextButton(onClick = vm::disconnect) { Text("重新连接") }
+                                TextButton(onClick = vm::dismissMessage) { Text("关闭") }
                             }
                         }
                     }
                 }
-                if (settings) ConnectionSettings(state, vm::disconnect)
+                state.message?.let { message ->
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = vm::dismissMessage) { Text("关闭") }
+                    }
+                }
+                if (settings && state.standalone) LocalMusicSettings(state, { vm.switchMode(false) }, vm::clearLocalCache)
+                else if (settings) Column {
+                    TextButton(onClick = { vm.switchMode(true) }, modifier = Modifier.padding(horizontal = 16.dp)) { Text("切换到手机独立模式") }
+                    ConnectionSettings(state, vm::disconnect)
+                }
                 else {
                     val groups = remember(state.tracks) { state.tracks.map { it.groupName }.distinct().sorted() }
                     LaunchedEffect(groups) { if (selectedGroup !in groups) selectedGroup = null }
-                    val filtered = remember(state.tracks, search, selectedGroup) {
-                        state.tracks.filter { it.matches(search) && (selectedGroup == null || it.groupName == selectedGroup) }
+                    val filtered = remember(state.tracks, search, selectedGroup, offlineOnly, state.downloads) {
+                        state.tracks.filter { it.matches(search) && (selectedGroup == null || it.groupName == selectedGroup) &&
+                            (!offlineOnly || state.downloads[it.id] == "已完整缓存") }
                     }
                     OutlinedTextField(value = search, onValueChange = { search = it }, singleLine = true,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -114,6 +139,7 @@ fun WorkstationRoot(vm: WorkstationViewModel) {
                         } })
                     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         item { FilterChip(selected = selectedGroup == null, onClick = { selectedGroup = null }, label = { Text("全部") }) }
+                        if (state.standalone) item { FilterChip(selected = offlineOnly, onClick = { offlineOnly = !offlineOnly }, label = { Text("已完整缓存") }) }
                         items(groups) { group -> FilterChip(selected = selectedGroup == group,
                             onClick = { selectedGroup = group }, label = { Text(group) }) }
                     }
@@ -121,17 +147,20 @@ fun WorkstationRoot(vm: WorkstationViewModel) {
                         style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
                     TextButton(onClick = {
-                        val base = state.server.toHttpUrl()
-                        filtered.firstOrNull { it.streamUrl(base) != null }?.let { vm.play(filtered, it.id) }
-                    }, enabled = filtered.any { it.streamUrl(state.server.toHttpUrl()) != null },
+                        filtered.firstOrNull { it.playableIn(state.server) }?.let { vm.play(filtered, it.id) }
+                    }, enabled = filtered.any { it.playableIn(state.server) },
                         modifier = Modifier.padding(horizontal = 12.dp)) {
                         Icon(Icons.Rounded.PlayArrow, null); Text("播放当前列表")
                     }
                     if (filtered.isEmpty() && !state.busy) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(if (state.tracks.isEmpty()) "音乐库暂无歌曲" else "没有找到匹配的歌曲")
+                        Text(if (state.tracks.isEmpty() && state.standalone) "点右上角 +，添加 BV 号或公开收藏夹链接"
+                            else if (state.tracks.isEmpty()) "音乐库暂无歌曲" else "没有找到匹配的歌曲")
                     } else LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
                         items(filtered, key = { it.id }) { track -> TrackRow(track, state.server,
-                            active = track.id == player.track?.id, onPlay = { vm.play(filtered, track.id) }) }
+                            active = track.id == player.track?.id, onPlay = { vm.play(filtered, track.id) },
+                            cacheStatus = state.downloads[track.id], actions = if (state.standalone) ({
+                                LocalTrackMenu(track, { vm.cacheLocal(track) }, { editing = track }, { deleting = track })
+                            }) else null) }
                     }
                 }
             }
@@ -141,10 +170,16 @@ fun WorkstationRoot(vm: WorkstationViewModel) {
         WorkstationPlayerDialog(player, state.server, vm, onDismiss = { showPlayer = false }, onQueue = { showQueue = true })
     }
     if (showQueue && state.connected) WorkstationQueueSheet(player, vm, onDismiss = { showQueue = false })
+    if (showAdd && state.standalone) LocalMusicImportDialog({ showAdd = false }) { raw -> showAdd = false; vm.importMusic(raw) }
+    editing?.let { track -> LocalMusicEditDialog(track, { editing = null }) { title, group -> vm.editLocal(track, title, group); editing = null } }
+    deleting?.let { track -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text("删除歌曲") },
+        text = { Text("删除「${track.displayTitle}」及它在手机上的音频缓存？") },
+        confirmButton = { TextButton(onClick = { vm.deleteLocal(track); deleting = null }) { Text("删除") } },
+        dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } }) }
 }
 
 @Composable
-private fun ConnectionForm(state: WorkstationState, connect: (String, String) -> Unit) {
+private fun ConnectionForm(state: WorkstationState, connect: (String, String) -> Unit, localMode: () -> Unit) {
     var address by rememberSaveable { mutableStateOf(state.server) }
     // Password deliberately stays out of saved instance state.
     var password by remember { mutableStateOf("") }
@@ -157,7 +192,7 @@ private fun ConnectionForm(state: WorkstationState, connect: (String, String) ->
             Spacer(Modifier.height(16.dp))
             Text("Mkusic", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(8.dp))
-            Text("音乐留在工作台，在手机上随时播放。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("连接自己的音乐服务器，或返回手机独立模式。", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item { OutlinedTextField(value = address, onValueChange = { address = it }, enabled = !state.busy,
             modifier = Modifier.fillMaxWidth(), label = { Text("服务器地址") }, placeholder = { Text("https://music.example.com/") }, singleLine = true,
@@ -173,22 +208,23 @@ private fun ConnectionForm(state: WorkstationState, connect: (String, String) ->
         state.error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
         item { Button(onClick = { connect(address, password) }, enabled = !state.busy,
             modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(if (state.busy) "正在连接…" else "连接音乐库") } }
+        item { TextButton(onClick = localMode, modifier = Modifier.fillMaxWidth()) { Text("不连接服务器，使用手机独立模式") } }
         item { Text("公网地址使用 HTTPS；局域网 IP 支持 HTTP。HTTP 连接未加密，请仅在可信 Wi-Fi 下使用。连接成功后，访问密码会加密保存在这台手机上。",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
 @Composable
-private fun TrackRow(track: WorkstationTrack, server: String, active: Boolean, onPlay: () -> Unit) {
-    val base = remember(server) { server.toHttpUrl() }
-    val playable = track.streamUrl(base) != null
+private fun TrackRow(track: WorkstationTrack, server: String, active: Boolean, onPlay: () -> Unit,
+    cacheStatus: String? = null, actions: (@Composable () -> Unit)? = null) {
+    val playable = track.playableIn(server)
     Row(Modifier.fillMaxWidth().clickable(enabled = playable, onClick = onPlay)
         .background(if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surface)
         .padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest),
             contentAlignment = Alignment.Center) {
             Icon(Icons.Rounded.MusicNote, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            AsyncImage(model = track.coverUrl(base), contentDescription = "${track.displayTitle} 封面",
+            AsyncImage(model = track.artworkIn(server), contentDescription = "${track.displayTitle} 封面",
                 modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
         Column(Modifier.weight(1f).padding(start = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -196,10 +232,11 @@ private fun TrackRow(track: WorkstationTrack, server: String, active: Boolean, o
             Text(listOfNotNull(track.artist?.takeIf { it.isNotBlank() }, track.groupName).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(if (playable) track.sourceName else "缺少服务器音源", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            Text(cacheStatus ?: if (playable) track.sourceName else "缺少音源", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
         }
         if (active) Icon(Icons.Rounded.Equalizer, "当前歌曲", tint = MaterialTheme.colorScheme.primary)
         else if (playable) Icon(Icons.Rounded.PlayArrow, "播放 ${track.displayTitle}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        actions?.invoke()
     }
 }
 

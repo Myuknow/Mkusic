@@ -17,6 +17,11 @@ import com.sikamikaniko.sonora.data.WorkstationErrors
 import com.sikamikaniko.sonora.data.WorkstationRepository
 import com.sikamikaniko.sonora.data.WorkstationTrack
 import com.sikamikaniko.sonora.data.WorkstationPlaybackStore
+import com.sikamikaniko.sonora.data.LocalMusicRepository
+import com.sikamikaniko.sonora.data.LocalBilibiliClient
+import com.sikamikaniko.sonora.data.BilibiliException
+import com.sikamikaniko.sonora.data.playableIn
+import com.sikamikaniko.sonora.playback.LocalMusicDownloads
 import com.sikamikaniko.sonora.playback.PlaybackService
 import com.sikamikaniko.sonora.playback.WorkstationMedia
 import com.sikamikaniko.sonora.playback.WorkstationStreaming
@@ -46,6 +51,10 @@ data class WorkstationState(
     val tracks: List<WorkstationTrack> = emptyList(),
     val refreshedAt: Long = 0,
     val cached: Boolean = false,
+    val standalone: Boolean = false,
+    val downloads: Map<String, String> = emptyMap(),
+    val downloadBytes: Long = 0,
+    val message: String? = null,
     val error: String? = null
 )
 
@@ -53,8 +62,10 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
     private val app = application as SonoraApp
     private val credentials = CredentialStore(application)
     private val repository = WorkstationRepository(application)
+    private val localRepository = LocalMusicRepository(application)
+    private val bilibili = LocalBilibiliClient()
     private var requestJob: Job? = null
-    private val mutableState = MutableStateFlow(WorkstationState())
+    private val mutableState = MutableStateFlow(WorkstationState(standalone = app.standalone, connected = app.standalone))
     val state = mutableState.asStateFlow()
     private var controller: MediaController? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
@@ -67,7 +78,10 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     init {
-        app.connection?.let { connection ->
+        if (app.standalone) {
+            refreshLocal()
+            connectController()
+        } else app.connection?.let { connection ->
             val cached = repository.cached(connection)
             mutableState.value = WorkstationState(server = connection.baseUrl.toString(), connected = true,
                 tracks = cached?.tracks.orEmpty(), refreshedAt = cached?.refreshedAt ?: 0, cached = cached != null)
@@ -78,7 +92,16 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
             while (isActive) {
                 controller?.takeIf { it.isConnected }?.let { c -> mutablePlayer.value = mutablePlayer.value.copy(
                     positionMs = c.currentPosition.coerceAtLeast(0), durationMs = c.duration.coerceAtLeast(0)) }
-                delay(500)
+                if (app.standalone) {
+                    try {
+                        val (statuses, bytes) = withContext(Dispatchers.IO) {
+                            LocalMusicDownloads.statuses(app) to LocalMusicDownloads.sizeBytes(app)
+                        }
+                        if (app.standalone) mutableState.value = mutableState.value.copy(downloads = statuses, downloadBytes = bytes)
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { /* Library and playback remain available if the download database is busy. */ }
+                }
+                delay(1000)
             }
         }
     }
@@ -106,6 +129,7 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun refresh() {
+        if (app.standalone) { refreshLocal(); return }
         val connection = app.connection ?: return
         if (mutableState.value.busy) return
         requestJob = viewModelScope.launch {
@@ -122,6 +146,98 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
     }
+
+    private fun refreshLocal() {
+        viewModelScope.launch {
+            try {
+                val tracks = withContext(Dispatchers.IO) { localRepository.tracks() }
+                if (app.standalone) mutableState.value = mutableState.value.copy(tracks = tracks, busy = false,
+                    connected = true, standalone = true, server = "", error = null)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { mutableState.value = mutableState.value.copy(busy = false, error = "手机音乐库读取失败，请保留数据后重试") }
+        }
+    }
+
+    fun switchMode(standalone: Boolean) {
+        if (app.standalone == standalone) return
+        requestJob?.cancel()
+        pendingAction = null
+        controller?.stop()
+        controller?.clearMediaItems()
+        releaseController()
+        app.standalone = standalone
+        mutablePlayer.value = WorkstationPlayerState()
+        mutableState.value = WorkstationState(standalone = standalone, connected = standalone,
+            server = if (standalone) "" else app.connection?.baseUrl?.toString().orEmpty())
+        if (standalone) { refreshLocal(); connectController() }
+        else app.connection?.let { connection ->
+            val cached = repository.cached(connection)
+            mutableState.value = mutableState.value.copy(connected = true, tracks = cached?.tracks.orEmpty(),
+                refreshedAt = cached?.refreshedAt ?: 0, cached = cached != null)
+            refresh(); connectController()
+        }
+    }
+
+    fun importMusic(raw: String) {
+        if (!app.standalone || mutableState.value.busy) return
+        requestJob = viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(busy = true, error = null, message = "正在读取 B站音乐…")
+            try {
+                val count = withContext(Dispatchers.IO) { localRepository.add(bilibili.tracks(raw)) }
+                if (app.standalone) {
+                    refreshLocal()
+                    mutableState.value = mutableState.value.copy(message = if (count == 0) "歌曲已在音乐库中" else "已添加 $count 首歌曲")
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                mutableState.value = mutableState.value.copy(busy = false, message = null,
+                    error = if (error is IllegalArgumentException || error is BilibiliException) error.message else "无法读取 B站音源，请检查网络后重试")
+            }
+        }
+    }
+
+    fun editLocal(track: WorkstationTrack, title: String, group: String) {
+        if (!app.standalone) return
+        viewModelScope.launch {
+            try { withContext(Dispatchers.IO) { localRepository.edit(track.id, title, group) }; refreshLocal() }
+            catch (error: Exception) { mutableState.value = mutableState.value.copy(error = error.message ?: "修改失败") }
+        }
+    }
+
+    fun deleteLocal(track: WorkstationTrack) {
+        if (!app.standalone) return
+        controller?.let { c ->
+            for (i in c.mediaItemCount - 1 downTo 0) if (c.getMediaItemAt(i).mediaId == track.id) c.removeMediaItem(i)
+        }
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { localRepository.remove(track.id) }
+                withContext(Dispatchers.IO) { LocalMusicDownloads.remove(app, track) }
+                refreshLocal()
+            } catch (_: Exception) { mutableState.value = mutableState.value.copy(error = "删除失败，请重试") }
+        }
+    }
+
+    fun cacheLocal(track: WorkstationTrack) {
+        if (!app.standalone) return
+        try { LocalMusicDownloads.enqueue(app, track); mutableState.value = mutableState.value.copy(message = "已加入完整缓存队列") }
+        catch (_: Exception) { mutableState.value = mutableState.value.copy(error = "缓存任务启动失败，请返回前台重试") }
+    }
+    fun clearLocalCache() {
+        if (!app.standalone) return
+        controller?.pause()
+        controller?.stop()
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { LocalMusicDownloads.clear(app) }
+                mutableState.value = mutableState.value.copy(message = "正在清理音频缓存，歌曲列表保留")
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { mutableState.value = mutableState.value.copy(error = "缓存清理失败，请稍后重试") }
+        }
+    }
+    fun dismissMessage() { mutableState.value = mutableState.value.copy(error = null, message = null) }
+
+    private fun canControl() = app.standalone || app.connection != null
 
     @OptIn(coil.annotation.ExperimentalCoilApi::class)
     fun disconnect() {
@@ -142,7 +258,7 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private fun connectController() {
-        if (closed || controller?.isConnected == true || controllerFuture != null || app.connection == null) return
+        if (closed || controller?.isConnected == true || controllerFuture != null || !canControl()) return
         controller?.let { releaseController() }
         val token = SessionToken(app, ComponentName(app, PlaybackService::class.java))
         val future = MediaController.Builder(app, token).setListener(object : MediaController.Listener {
@@ -158,7 +274,7 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
         }).buildAsync()
         controllerFuture = future
         future.addListener({
-            if (controllerFuture !== future || app.connection == null) return@addListener
+            if (controllerFuture !== future || !canControl()) return@addListener
             try {
                 val connected = future.get()
                 check(connected.isConnected) { "Player disconnected during connection" }
@@ -187,15 +303,15 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
             positionMs = c.currentPosition.coerceAtLeast(0), durationMs = c.duration.coerceAtLeast(0),
             seekable = c.isCurrentMediaItemSeekable, canSkipNext = c.hasNextMediaItem(),
             repeat = c.repeatMode, shuffle = c.shuffleModeEnabled,
-            error = c.playerError?.let(WorkstationStreaming::errorMessage))
+            error = c.playerError?.let { WorkstationStreaming.errorMessage(it, app.standalone) })
     }
 
     fun play(tracks: List<WorkstationTrack>, startId: String) {
-        val connection = app.connection ?: return
-        val queue = tracks.filter { it.streamUrl(connection.baseUrl) != null }
+        val connection = if (app.standalone) null else app.connection ?: return
+        val queue = tracks.filter { it.playableIn(if (app.standalone) "" else connection!!.baseUrl.toString()) }
         val index = queue.indexOfFirst { it.id == startId }
         if (index < 0) {
-            mutablePlayer.value = mutablePlayer.value.copy(error = "这首歌曲没有可播放的服务器音源")
+            mutablePlayer.value = mutablePlayer.value.copy(error = "这首歌曲没有可播放的音源")
             return
         }
         withController { c ->
@@ -206,10 +322,15 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     /** Rebind on returning to the app, without starting paused music automatically. */
-    fun onForeground() { connectController() }
+    fun onForeground() {
+        connectController()
+        if (app.standalone) try { LocalMusicDownloads.resume(app) } catch (_: Exception) {
+            mutableState.value = mutableState.value.copy(error = "待缓存任务未能恢复，可在歌曲菜单中重试缓存")
+        }
+    }
 
     private fun withController(action: (MediaController) -> Unit) {
-        if (closed || app.connection == null) return
+        if (closed || !canControl()) return
         val current = controller
         if (current?.isConnected == true) action(current) else {
             pendingAction = action

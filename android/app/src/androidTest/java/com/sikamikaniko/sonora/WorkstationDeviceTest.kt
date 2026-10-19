@@ -32,6 +32,10 @@ class WorkstationDeviceTest {
         val password = InstrumentationRegistry.getArguments().getString("workstationPassword")
         require(!password.isNullOrEmpty()) { "Provide workstationPassword as an instrumentation argument" }
         val context = instrumentation.targetContext
+        if ((context.applicationContext as SonoraApp).standalone) {
+            compose.onNodeWithText("设置").performClick()
+            compose.onNodeWithText("连接自己的音乐服务器").performScrollTo().performClick()
+        }
         if ((context.applicationContext as SonoraApp).connection != null) {
             compose.onNodeWithText("设置").performClick()
             compose.onNodeWithText("断开连接并清除保存的密码").performScrollTo().performClick()
@@ -45,7 +49,7 @@ class WorkstationDeviceTest {
         }
         compose.onNode(passwordField).performScrollTo().performTextReplacement(password)
         compose.onNodeWithText("连接音乐库").performScrollTo().performClick()
-        compose.waitUntil(60_000) { compose.onAllNodesWithText("我的音乐库").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(60_000) { compose.onAllNodesWithText("服务器音乐库").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("播放当前列表").assertIsDisplayed()
 
         val saved = CredentialStore(context).load()

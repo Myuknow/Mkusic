@@ -47,6 +47,8 @@ class WorkstationPlaybackDeviceTest {
         val password = InstrumentationRegistry.getArguments().getString("workstationPassword")
         require(!password.isNullOrEmpty()) { "Provide workstationPassword at runtime" }
         val app = context.applicationContext as SonoraApp
+        val originalMode = app.standalone
+        app.standalone = false
         val connection = ServerConnection.create(testServerAddress(), password)
         val credentials = CredentialStore(context)
         val store = WorkstationPlaybackStore(context)
@@ -114,6 +116,7 @@ class WorkstationPlaybackDeviceTest {
         } finally {
             main { current?.let { it.pause(); it.clearMediaItems(); it.release() }; context.stopService(Intent(context, PlaybackService::class.java)) }
             app.connection = null
+            app.standalone = originalMode
             credentials.clear(); store.clear(); repository.clear()
         }
     }

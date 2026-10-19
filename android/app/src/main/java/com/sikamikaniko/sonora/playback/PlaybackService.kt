@@ -25,6 +25,8 @@ import com.sikamikaniko.sonora.SonoraApp
 import com.sikamikaniko.sonora.data.WorkstationHttp
 import com.sikamikaniko.sonora.data.WorkstationPlaybackStore
 import com.sikamikaniko.sonora.data.WorkstationRepository
+import com.sikamikaniko.sonora.data.LocalMusicRepository
+import com.sikamikaniko.sonora.data.LocalBilibiliClient
 
 /**
  * Foreground media service. Media3 handles the notification and lock-screen
@@ -103,7 +105,8 @@ class PlaybackService : MediaSessionService() {
 
         val artwork = CacheBitmapLoader(DataSourceBitmapLoader(
             DataSourceBitmapLoader.DEFAULT_EXECUTOR_SERVICE.get(),
-            DefaultDataSource.Factory(this, OkHttpDataSource.Factory(WorkstationHttp.client { app.connection }))
+            DefaultDataSource.Factory(this, OkHttpDataSource.Factory(WorkstationHttp.client { app.connection })
+                .setDefaultRequestProperties(LocalBilibiliClient.headers))
         ))
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(sessionActivity)
@@ -111,11 +114,14 @@ class PlaybackService : MediaSessionService() {
             .setCallback(object : MediaSession.Callback {
                 override fun onAddMediaItems(session: MediaSession, controller: MediaSession.ControllerInfo,
                     mediaItems: List<MediaItem>): ListenableFuture<List<MediaItem>> {
-                    val connection = app.connection ?: return Futures.immediateFailedFuture(IllegalStateException("请先连接服务器"))
+                    val connection = if (app.standalone) null else app.connection
+                    if (!app.standalone && connection == null) return Futures.immediateFailedFuture(IllegalStateException("请先连接服务器"))
                     return try {
-                        val known = WorkstationRepository(this@PlaybackService).cached(connection)?.tracks.orEmpty().associateBy { it.id }
+                        val known = (if (app.standalone) LocalMusicRepository(this@PlaybackService).tracks()
+                            else WorkstationRepository(this@PlaybackService).cached(connection!!)?.tracks.orEmpty()).associateBy { it.id }
                         val items = mediaItems.map { item ->
-                            val track = WorkstationMedia.track(item)?.takeIf { it.id == item.mediaId } ?: known[item.mediaId]
+                            val track = if (app.standalone) known[item.mediaId]
+                                else WorkstationMedia.track(item)?.takeIf { it.id == item.mediaId } ?: known[item.mediaId]
                             WorkstationMedia.item(requireNotNull(track) { "未找到这首歌曲" }, connection)
                         }
                         Futures.immediateFuture(items)
@@ -124,17 +130,23 @@ class PlaybackService : MediaSessionService() {
 
                 override fun onPlaybackResumption(session: MediaSession, controller: MediaSession.ControllerInfo):
                     ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
-                    val connection = app.connection ?: return Futures.immediateFailedFuture(IllegalStateException("请先连接服务器"))
-                    val saved = store.load(connection) ?: return Futures.immediateFailedFuture(IllegalStateException("没有可恢复的播放队列"))
+                    val connection = if (app.standalone) null else app.connection
+                    if (!app.standalone && connection == null) return Futures.immediateFailedFuture(IllegalStateException("请先连接服务器"))
+                    val available = if (app.standalone) LocalMusicRepository(this@PlaybackService).tracks().map { it.id }.toSet() else null
+                    val saved = store.load(connection)?.playable(connection, available)
+                        ?: return Futures.immediateFailedFuture(IllegalStateException("没有可恢复的播放队列"))
                     return Futures.immediateFuture(MediaSession.MediaItemsWithStartPosition(
                         saved.tracks.map { WorkstationMedia.item(it, connection) }, saved.index, saved.positionMs))
                 }
             })
             .build()
-        val saved = app.connection?.let(store::load)
+        val activeConnection = if (app.standalone) null else app.connection
+        val available = if (app.standalone) LocalMusicRepository(this).tracks().map { it.id }.toSet() else null
+        val saved = if (app.standalone || activeConnection != null) store.load(activeConnection)?.playable(activeConnection, available) else null
         player.addListener(object : Player.Listener {
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-                val connection = app.connection ?: return
+                val connection = if (app.standalone) null else app.connection
+                if (!app.standalone && connection == null) return
                 val queue = (0 until player.mediaItemCount).mapNotNull { WorkstationMedia.track(player.getMediaItemAt(it)) }
                 if (queue.isEmpty()) store.clear() else store.saveQueue(connection, queue)
                 persistPosition()
@@ -148,10 +160,10 @@ class PlaybackService : MediaSessionService() {
                 }
             }
         })
-        if (saved != null && app.connection != null) {
+        if (saved != null) {
             player.repeatMode = saved.repeatMode
             player.shuffleModeEnabled = saved.shuffle
-            player.setMediaItems(saved.tracks.map { WorkstationMedia.item(it, app.connection!!) }, saved.index, saved.positionMs)
+            player.setMediaItems(saved.tracks.map { WorkstationMedia.item(it, activeConnection) }, saved.index, saved.positionMs)
             // Restore paused. Playback starts only after an explicit play command.
         }
         handler.postDelayed(saveProgress, 5_000)

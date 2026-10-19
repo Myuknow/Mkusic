@@ -25,6 +25,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
+import com.sikamikaniko.sonora.data.artworkIn
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
 @Composable
@@ -83,7 +84,7 @@ fun WorkstationPlayerDialog(state: WorkstationPlayerState, server: String, vm: W
 private fun PlayerArtwork(state: WorkstationPlayerState, server: String, modifier: Modifier) {
     Box(modifier.clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
         Icon(Icons.Rounded.MusicNote, null, modifier = Modifier.fillMaxSize(0.45f), tint = MaterialTheme.colorScheme.primary)
-        AsyncImage(model = state.track?.coverUrl(server.toHttpUrl()), contentDescription = "歌曲封面",
+        AsyncImage(model = state.track?.artworkIn(server), contentDescription = "歌曲封面",
             modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     }
 }

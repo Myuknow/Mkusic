@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.media3.common.C
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
@@ -22,7 +23,12 @@ import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLException
 
 object WorkstationStreaming {
-    fun cacheFactory(context: Context): CacheDataSource.Factory {
+    fun cacheFactory(context: Context): DataSource.Factory = DataSource.Factory {
+        if ((context.applicationContext as SonoraApp).standalone) LocalMusicDownloads.playbackFactory(context).createDataSource()
+        else serverCacheFactory(context).createDataSource()
+    }
+
+    private fun serverCacheFactory(context: Context): CacheDataSource.Factory {
         val app = context.applicationContext as SonoraApp
         // A stream may run for minutes. Read timeout remains bounded, total call time does not.
         val client = WorkstationHttp.client { app.connection }.newBuilder()
@@ -61,13 +67,14 @@ object WorkstationStreaming {
         }
     }
 
-    fun errorMessage(error: Throwable): String {
+    fun errorMessage(error: Throwable, standalone: Boolean = false): String {
         var cause: Throwable? = error
         while (cause != null) {
+            if (cause is com.sikamikaniko.sonora.data.BilibiliException) return cause.message ?: "B站音源暂时不可用"
             if (cause is HttpException) return com.sikamikaniko.sonora.data.WorkstationErrors.message(cause)
             if (cause is HttpDataSource.InvalidResponseCodeException) return when (cause.responseCode) {
-                401, 403 -> "访问密码已失效，请重新连接服务器"
-                404 -> "这首歌曲已失效或服务器文件不存在"
+                401, 403 -> if (standalone) "B站音源地址已过期或暂时受限，请重试播放" else "访问密码已失效，请重新连接服务器"
+                404 -> if (standalone) "这首 B站音源已失效" else "这首歌曲已失效或服务器文件不存在"
                 502, 503, 504 -> "服务器暂时无法获取这首歌曲，可重试或切换下一首"
                 else -> "音频请求失败（HTTP ${cause.responseCode}）"
             }
