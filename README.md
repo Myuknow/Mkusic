@@ -4,8 +4,6 @@
 
 安卓端基于 [Sonora](https://github.com/SikamikanikoBG/Sonora) 修改，感谢原作者。项目还比较简单，如果刚好合用，欢迎拿去折腾。
 
-当前版本 **0.3.4**，支持 **Android 8.0 及以上**。
-
 [下载安装包](https://github.com/Myuknow/Mkusic/releases/latest) · [Android 使用与构建说明](android/README.md)
 
 ## 能做什么
