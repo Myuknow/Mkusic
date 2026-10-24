@@ -62,7 +62,7 @@ npm test
 
 安卓端：直接使用apk安装包，大概率都能用。
 
-Windows 使用 `gradlew.bat`。APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`。GitHub Actions 会运行服务端测试和安卓构建检查；暂不自动发布安装包。
+Windows 使用 `gradlew.bat`。
 
 ## 当前限制
 
