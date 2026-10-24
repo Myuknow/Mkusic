@@ -6,7 +6,7 @@
 
 | 路径 | 内容 |
 | --- | --- |
-| `README.md` | 项目简介、启动、App 连接和构建说明 |
+| `README.md` | 手机 App 简介、下载、使用方式和文档入口；服务端详情在 `server/README.md` |
 | `LICENSE`、`THIRD_PARTY_NOTICES.md` | 许可证与上游来源 |
 | `.gitignore`、`.gitattributes` | 排除私人数据、统一脚本换行 |
 | `.github/workflows/ci.yml` | 服务端测试和安卓构建检查 |
